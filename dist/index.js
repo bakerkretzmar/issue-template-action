@@ -3,35 +3,68 @@ require('./sourcemap-register.js');module.exports =
 /******/ 	var __webpack_modules__ = ({
 
 /***/ 932:
-/***/ ((__unused_webpack_module, __unused_webpack_exports, __webpack_require__) => {
+/***/ ((__unused_webpack_module, __unused_webpack_exports, __nccwpck_require__) => {
 
-const core = __webpack_require__(186);
-const wait = __webpack_require__(258);
+const core = __nccwpck_require__(186);
+const fs = __nccwpck_require__(747);
+const github = __nccwpck_require__(716);
+const mdjson = __nccwpck_require__(498);
+const wait = __nccwpck_require__(653);
 
+const ISSUE_TEMPLATE_DIR = '.github/ISSUE_TEMPLATE';
 
-// most @actions toolkit packages have async methods
-async function run() {
-  try {
-    const ms = core.getInput('milliseconds');
-    core.info(`Waiting ${ms} milliseconds ...`);
+(async () => {
+    const { payload } = github.context;
+    const client = new github.GitHub(core.getInput('github-token', { required: true }));
+    const label = core.getInput('closed-issue-label');
 
-    core.debug((new Date()).toTimeString()); // debug is only output if you set the secret `ACTIONS_RUNNER_DEBUG` to true
-    await wait(parseInt(ms));
-    core.info((new Date()).toTimeString());
+    const headings = Object.keys(mdjson(payload.issue.body));
+    const templates = fs.readdirSync(ISSUE_TEMPLATE_DIR);
 
-    core.setOutput('time', new Date().toTimeString());
-  } catch (error) {
-    core.setFailed(error.message);
-  }
-}
+    const valid = templates.some((template) => {
+        const md = fs.readFileSync(`${ISSUE_TEMPLATE_DIR}/${template}`, 'utf-8');
+        return Object.keys(mdjson(md)).every((title) => headings.includes(title));
+    });
 
-run();
+    const issue = {
+        owner: payload.issue.owner,
+        repo: payload.issue.repo,
+        issue_number: payload.issue.number,
+    };
+
+    if (valid || payload.action !== 'opened') {
+        // Only reopen the issue if there's a `closed-issues-label` so it knows that
+        // it was previously closed because of the wrong template
+        if (payload.issue.state === 'closed' && label) {
+            const labels = (await client.issues.listLabelsOnIssue(issue)).data.map(({ name }) => name);
+
+            if (!labels.includes(label)) {
+                return;
+            }
+
+            await client.issues.removeLabel({ name: label, ...issue });
+            await client.issues.update({ state: 'open', ...issue });
+            return;
+        }
+
+        return;
+    }
+
+    if (label) {
+        await client.issues.addLabels({ labels: [label], ...issue });
+    }
+
+    const message = `Hi @${github.context.payload.issue.user.login} :wave:\n\nThis issue is being automatically closed because it does not follow the issue template.`;
+
+    await client.issues.createComment({ body: getIssueCloseMessage(), ...issue });
+    await client.issues.update({ state: 'closed', ...issue });
+})();
 
 
 /***/ }),
 
 /***/ 351:
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
 
@@ -43,8 +76,8 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-const os = __importStar(__webpack_require__(87));
-const utils_1 = __webpack_require__(278);
+const os = __importStar(__nccwpck_require__(87));
+const utils_1 = __nccwpck_require__(278);
 /**
  * Commands
  *
@@ -117,7 +150,7 @@ function escapeProperty(s) {
 /***/ }),
 
 /***/ 186:
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
 
@@ -138,11 +171,11 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-const command_1 = __webpack_require__(351);
-const file_command_1 = __webpack_require__(717);
-const utils_1 = __webpack_require__(278);
-const os = __importStar(__webpack_require__(87));
-const path = __importStar(__webpack_require__(622));
+const command_1 = __nccwpck_require__(351);
+const file_command_1 = __nccwpck_require__(717);
+const utils_1 = __nccwpck_require__(278);
+const os = __importStar(__nccwpck_require__(87));
+const path = __importStar(__nccwpck_require__(622));
 /**
  * The code to exit an action
  */
@@ -362,7 +395,7 @@ exports.getState = getState;
 /***/ }),
 
 /***/ 717:
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
 
@@ -377,9 +410,9 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const fs = __importStar(__webpack_require__(747));
-const os = __importStar(__webpack_require__(87));
-const utils_1 = __webpack_require__(278);
+const fs = __importStar(__nccwpck_require__(747));
+const os = __importStar(__nccwpck_require__(87));
+const utils_1 = __nccwpck_require__(278);
 function issueCommand(command, message) {
     const filePath = process.env[`GITHUB_${command}`];
     if (!filePath) {
@@ -423,19 +456,26 @@ exports.toCommandValue = toCommandValue;
 
 /***/ }),
 
-/***/ 258:
+/***/ 653:
 /***/ ((module) => {
 
-let wait = function (milliseconds) {
-  return new Promise((resolve) => {
-    if (typeof milliseconds !== 'number') {
-      throw new Error('milliseconds not a number');
-    }
-    setTimeout(() => resolve("done!"), milliseconds)
-  });
-};
+module.exports = eval("require")("./wait");
 
-module.exports = wait;
+
+/***/ }),
+
+/***/ 716:
+/***/ ((module) => {
+
+module.exports = eval("require")("@actions/github");
+
+
+/***/ }),
+
+/***/ 498:
+/***/ ((module) => {
+
+module.exports = eval("require")("mdjson");
 
 
 /***/ }),
@@ -470,7 +510,7 @@ module.exports = require("path");;
 /******/ 	var __webpack_module_cache__ = {};
 /******/ 	
 /******/ 	// The require function
-/******/ 	function __webpack_require__(moduleId) {
+/******/ 	function __nccwpck_require__(moduleId) {
 /******/ 		// Check if module is in cache
 /******/ 		if(__webpack_module_cache__[moduleId]) {
 /******/ 			return __webpack_module_cache__[moduleId].exports;
@@ -485,7 +525,7 @@ module.exports = require("path");;
 /******/ 		// Execute the module function
 /******/ 		var threw = true;
 /******/ 		try {
-/******/ 			__webpack_modules__[moduleId].call(module.exports, module, module.exports, __webpack_require__);
+/******/ 			__webpack_modules__[moduleId].call(module.exports, module, module.exports, __nccwpck_require__);
 /******/ 			threw = false;
 /******/ 		} finally {
 /******/ 			if(threw) delete __webpack_module_cache__[moduleId];
@@ -498,11 +538,11 @@ module.exports = require("path");;
 /************************************************************************/
 /******/ 	/* webpack/runtime/compat */
 /******/ 	
-/******/ 	__webpack_require__.ab = __dirname + "/";/************************************************************************/
+/******/ 	__nccwpck_require__.ab = __dirname + "/";/************************************************************************/
 /******/ 	// module exports must be returned from runtime so entry inlining is disabled
 /******/ 	// startup
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(932);
+/******/ 	return __nccwpck_require__(932);
 /******/ })()
 ;
 //# sourceMappingURL=index.js.map
